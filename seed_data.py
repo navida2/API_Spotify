@@ -57,7 +57,7 @@ def seed():
     user_count = 0
     for school in SCHOOLS:
         num_users = random.randint(15, 40)
-        school_tracks = random.sample(TRACKS, min(len(TRACKS), 20))
+        school_tracks = random.sample(TRACKS, min(len(TRACKS), 20))  # picked ONCE per school
 
         for i in range(num_users):
             user_id = f"fake_{school.replace(' ', '_').lower()}_{i}"
