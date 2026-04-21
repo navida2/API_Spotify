@@ -82,3 +82,30 @@ async def top_tracks(time_range: str = "short_term", limit: int = 10):
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
         )
     return response.json()
+
+@app.get("/top-artists")
+async def top_artists(time_range: str = "short_term", limit: int = 10):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"https://api.spotify.com/v1/me/top/artists?time_range={time_range}&limit={limit}",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+    return response.json()
+
+@app.get("/audio-features")
+async def audio_features(time_range: str = "short_term", limit: int = 10):
+    async with httpx.AsyncClient() as client:
+        # First get top tracks
+        tracks_response = await client.get(
+            f"https://api.spotify.com/v1/me/top/tracks?time_range={time_range}&limit={limit}",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+        tracks = tracks_response.json()["items"]
+        track_ids = ",".join([t["id"] for t in tracks])
+
+        # Then get audio features for those tracks
+        features_response = await client.get(
+            f"https://api.spotify.com/v1/audio-features?ids={track_ids}",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+    return features_response.json()
