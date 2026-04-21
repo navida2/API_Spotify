@@ -196,7 +196,21 @@ async def callback(code: str, response: Response):
             "https://api.spotify.com/v1/me",
             headers={"Authorization": f"Bearer {token_data['access_token']}"},
         )
-    profile = me_resp.json()
+    if me_resp.status_code != 200:
+        print(f"[callback] /me failed: {me_resp.status_code} {me_resp.text[:200]}")
+        # User probably isn't on the Spotify app's allowlist
+        return RedirectResponse(
+            f"{FRONTEND_URL}?error=not_allowlisted",
+            status_code=303,
+        )
+    try:
+        profile = me_resp.json()
+    except Exception as e:
+        print(f"[callback] /me returned non-JSON: {me_resp.text[:200]}")
+        return RedirectResponse(
+            f"{FRONTEND_URL}?error=spotify_error",
+            status_code=303,
+        )
 
     school = detect_school(profile.get("email"))
     images = profile.get("images") or []
@@ -232,7 +246,12 @@ async def callback(code: str, response: Response):
 
 @app.post("/logout")
 def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME)
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        samesite="none" if IS_PROD else "lax",
+        secure=IS_PROD,
+    )
     return {"ok": True}
 
 
