@@ -1,9 +1,14 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 import os
 from urllib.parse import urlencode
 import httpx
+from database import (
+    init_db, save_user, save_top_tracks, get_school_top_tracks,
+    set_school, detect_school, SCHOOLS
+)
+
 load_dotenv()
 
 app = FastAPI()
@@ -11,41 +16,23 @@ app = FastAPI()
 CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
-from dotenv import load_dotenv
-import os
-from urllib.parse import urlencode
 
-load_dotenv()
-print("CLIENT_ID:", CLIENT_ID)
-print("REDIRECT_URI:", REDIRECT_URI)
-app = FastAPI()
+token_store = {}
 
-CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
-CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
-print("CLIENT_ID:", CLIENT_ID)
-print("REDIRECT_URI:", REDIRECT_URI)
+@app.on_event("startup")
+async def startup():
+    await init_db()
+
 @app.get("/login")
 def login():
-    # Build the Spotify authorize URL with query params:
-    # - client_id
-    # - response_type (should be "code")
-    # - redirect_uri
-    # - scope (start with "user-read-private user-top-read")
-    # Then return RedirectResponse(url)
     params = urlencode({
         "client_id": CLIENT_ID,
         "response_type": "code",
         "redirect_uri": REDIRECT_URI,
-        "scope": "user-read-private user-top-read"
+        "scope": "user-read-private user-top-read user-read-email"
     })
     return RedirectResponse(f"https://accounts.spotify.com/authorize?{params}")
-# Add this after your CLIENT_SECRET/REDIRECT_URI lines
-token_store = {}
 
-# Update your callback to save the token
 @app.get("/callback")
 async def callback(code: str):
     async with httpx.AsyncClient() as client:
@@ -62,9 +49,37 @@ async def callback(code: str):
     token_data = response.json()
     token_store["access_token"] = token_data["access_token"]
     token_store["refresh_token"] = token_data["refresh_token"]
-    return {"message": "Logged in successfully"}
 
-# Add this new route
+    async with httpx.AsyncClient() as client:
+        me_resp = await client.get(
+            "https://api.spotify.com/v1/me",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+    profile = me_resp.json()
+    token_store["spotify_id"] = profile["id"]
+
+    school = detect_school(profile.get("email"))
+    await save_user(
+        spotify_id=profile["id"],
+        display_name=profile.get("display_name"),
+        email=profile.get("email"),
+        access_token=token_data["access_token"],
+        refresh_token=token_data["refresh_token"],
+        school=school,
+    )
+    # Auto-save top tracks to DB
+    async with httpx.AsyncClient() as client:
+        for tr in ["short_term", "medium_term", "long_term"]:
+            tracks_resp = await client.get(
+                f"https://api.spotify.com/v1/me/top/tracks?time_range={tr}&limit=50",
+                headers={"Authorization": f"Bearer {token_store['access_token']}"},
+            )
+            tracks_data = tracks_resp.json()
+            if "items" in tracks_data:
+                await save_top_tracks(profile["id"], tracks_data["items"], tr)
+
+    return {"message": "Logged in successfully", "user": profile["display_name"], "school": school}
+
 @app.get("/me")
 async def me():
     async with httpx.AsyncClient() as client:
@@ -81,7 +96,10 @@ async def top_tracks(time_range: str = "short_term", limit: int = 10):
             f"https://api.spotify.com/v1/me/top/tracks?time_range={time_range}&limit={limit}",
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
         )
-    return response.json()
+    tracks = response.json()
+    if "items" in tracks:
+        await save_top_tracks(token_store["spotify_id"], tracks["items"], time_range)
+    return tracks
 
 @app.get("/top-artists")
 async def top_artists(time_range: str = "short_term", limit: int = 10):
@@ -95,15 +113,12 @@ async def top_artists(time_range: str = "short_term", limit: int = 10):
 @app.get("/audio-features")
 async def audio_features(time_range: str = "short_term", limit: int = 10):
     async with httpx.AsyncClient() as client:
-        # First get top tracks
         tracks_response = await client.get(
             f"https://api.spotify.com/v1/me/top/tracks?time_range={time_range}&limit={limit}",
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
         )
         tracks = tracks_response.json()["items"]
         track_ids = ",".join([t["id"] for t in tracks])
-
-        # Then get audio features for those tracks
         features_response = await client.get(
             f"https://api.spotify.com/v1/audio-features?ids={track_ids}",
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
@@ -113,7 +128,6 @@ async def audio_features(time_range: str = "short_term", limit: int = 10):
 @app.get("/discover")
 async def discover(time_range: str = "short_term", limit: int = 20):
     async with httpx.AsyncClient() as client:
-        # Get top tracks and artists for seeds
         tracks_resp = await client.get(
             f"https://api.spotify.com/v1/me/top/tracks?time_range={time_range}&limit=5",
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
@@ -126,7 +140,6 @@ async def discover(time_range: str = "short_term", limit: int = 20):
         )
         artists = artists_resp.json()["items"]
 
-        # Get audio features for your top tracks
         track_ids = ",".join([t["id"] for t in tracks])
         features_resp = await client.get(
             f"https://api.spotify.com/v1/audio-features?ids={track_ids}",
@@ -134,17 +147,14 @@ async def discover(time_range: str = "short_term", limit: int = 20):
         )
         features = [f for f in features_resp.json()["audio_features"] if f]
 
-        # Calculate your averages
         avg = {}
         for key in ["danceability", "energy", "valence", "acousticness", "tempo"]:
             vals = [f[key] for f in features]
             avg[key] = round(sum(vals) / len(vals), 2) if vals else 0
 
-        # Seeds: 3 tracks + 2 artists
         seed_tracks = ",".join([t["id"] for t in tracks[:3]])
         seed_artists = ",".join([a["id"] for a in artists[:2]])
 
-        # Recommendations with your audio profile as targets
         recs_resp = await client.get(
             f"https://api.spotify.com/v1/recommendations"
             f"?seed_tracks={seed_tracks}"
@@ -178,3 +188,24 @@ async def discover(time_range: str = "short_term", limit: int = 20):
         "audio_profile": avg,
         "recommendations": results,
     }
+
+@app.get("/schools")
+def schools():
+    return SCHOOLS
+
+@app.post("/set-school")
+async def update_school(school: str):
+    if school not in SCHOOLS:
+        return {"error": "Invalid school"}
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"error": "Not logged in"}
+    await set_school(spotify_id, school)
+    return {"message": f"School set to {school}"}
+
+@app.get("/school-top-tracks")
+async def school_top_tracks(school: str, time_range: str = "short_term"):
+    if school not in SCHOOLS:
+        return {"error": "Invalid school"}
+    tracks = await get_school_top_tracks(school, time_range)
+    return {"school": school, "top_tracks": tracks}

@@ -2,6 +2,38 @@ import aiosqlite
 
 DB_PATH = "app.db"
 
+SCHOOLS = [
+    "UC Berkeley",
+    "UC Davis",
+    "UC Irvine",
+    "UC Los Angeles",
+    "UC Merced",
+    "UC Riverside",
+    "UC San Diego",
+    "UC San Francisco",
+    "UC Santa Barbara",
+    "UC Santa Cruz",
+]
+
+SCHOOL_DOMAINS = {
+    "uci.edu": "UC Irvine",
+    "berkeley.edu": "UC Berkeley",
+    "ucla.edu": "UC Los Angeles",
+    "ucsd.edu": "UC San Diego",
+    "ucdavis.edu": "UC Davis",
+    "ucsb.edu": "UC Santa Barbara",
+    "ucsc.edu": "UC Santa Cruz",
+    "ucr.edu": "UC Riverside",
+    "ucmerced.edu": "UC Merced",
+    "ucsf.edu": "UC San Francisco",
+}
+
+def detect_school(email):
+    if not email:
+        return None
+    domain = email.split("@")[-1]
+    return SCHOOL_DOMAINS.get(domain)
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -45,7 +77,6 @@ async def save_user(spotify_id, display_name, email, access_token, refresh_token
 
 async def save_top_tracks(spotify_id, tracks, time_range):
     async with aiosqlite.connect(DB_PATH) as db:
-        # Clear old tracks for this user/time_range
         await db.execute(
             "DELETE FROM top_tracks WHERE spotify_id = ? AND time_range = ?",
             (spotify_id, time_range)
