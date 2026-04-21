@@ -75,7 +75,7 @@ function App() {
   }
 
   async function loadSchoolTracks(s) {
-    const res = await axios.get(`/api/school-top-tracks?school=${encodeURIComponent(s)}&time_range=${timeRange}`)
+    const res = await axios.get(`/api/school-top-tracks?school=${encodeURIComponent(s)}&time_range=short_term`)
     setSchoolTracks(res.data.top_tracks || [])
   }
 
@@ -120,7 +120,7 @@ function App() {
 
   async function createPlaylist() {
     setPlaylistLoading(true)
-    const res = await axios.get(`/api/create-campus-playlist?school=${encodeURIComponent(school)}&time_range=${timeRange}`)
+    const res = await axios.get(`/api/create-campus-playlist?school=${encodeURIComponent(school)}&time_range=short_term`)
     setPlaylistUrl(res.data.playlist_url || null)
     setPlaylistLoading(false)
   }
@@ -166,7 +166,7 @@ function App() {
       </div>
 
       <div className="grid">
-        <section>
+        <div className="card">
           <h2>Top Tracks</h2>
           <ol>
             {topTracks.map(t => (
@@ -179,14 +179,14 @@ function App() {
               </li>
             ))}
           </ol>
-        </section>
+        </div>
 
-        <section>
+        <div className="card">
           <h2>Top Artists</h2>
           <ol>
             {topArtists.map(a => (
               <li key={a.id}>
-                <img src={a.images[2]?.url} alt="" />
+                <img src={a.images[2]?.url} alt="" style={{borderRadius: '50%'}} />
                 <div>
                   <strong>{a.name}</strong>
                   <span>{a.genres?.slice(0, 2).join(', ')}</span>
@@ -194,56 +194,60 @@ function App() {
               </li>
             ))}
           </ol>
-        </section>
+        </div>
       </div>
 
       <section className="school-section">
-        <div style={{display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px'}}>
-          <h2 style={{margin: 0}}>Campus Top Tracks</h2>
+        <div className="section-header">
+          <h2>Campus Top Tracks</h2>
           <select
             value={viewingSchool || ''}
             onChange={(e) => {
               setViewingSchool(e.target.value)
               loadSchoolTracks(e.target.value)
             }}
-            style={{background: '#282828', color: '#fff', border: '1px solid #444', padding: '6px 10px', borderRadius: '8px', fontSize: '0.85rem'}}
           >
             {schools.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        {viewingSchool && schoolTracks.length > 0 ? (
-          <>
-            {viewingSchool === school && (
-              <p style={{color: '#b3b3b3', marginBottom: '12px', fontSize: '0.85rem'}}>Vote for the best track at your school</p>
-            )}
-            <ol>
-              {schoolTracks.map((t, i) => (
-                <li key={i} className="votable-track">
-                  {t.image_url && <img src={t.image_url} alt="" />}
-                  <div style={{flex: 1}}>
-                    <strong>{t.track_name}</strong>
-                    <span>{t.artist_name} • {t.listener_count} listener{t.listener_count > 1 ? 's' : ''}</span>
-                  </div>
-                  {viewingSchool === school && (
-                    <button
-                      className={`vote-btn ${myTrackVote === t.track_id ? 'voted' : ''}`}
-                      onClick={() => handleVoteTrack(t.track_id)}
-                    >
-                      {myTrackVote === t.track_id ? '✓' : '♪'} {t.vote_count || 0}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : viewingSchool ? (
-          <p style={{color: '#b3b3b3'}}>No data yet for this school.</p>
-        ) : null}
+        <div className="school-card">
+          {viewingSchool && schoolTracks.length > 0 ? (
+            <>
+              {viewingSchool === school && (
+                <p className="subtitle">Vote for the best track at your school</p>
+              )}
+              {viewingSchool !== school && (
+                <p className="subtitle">Viewing {viewingSchool}'s top tracks</p>
+              )}
+              <ol>
+                {schoolTracks.map((t, i) => (
+                  <li key={i} className="votable-track">
+                    {t.image_url && <img src={t.image_url} alt="" />}
+                    <div style={{flex: 1}}>
+                      <strong>{t.track_name}</strong>
+                      <span>{t.artist_name} • {t.listener_count} listener{t.listener_count > 1 ? 's' : ''}</span>
+                    </div>
+                    {viewingSchool === school && (
+                      <button
+                        className={`vote-btn ${myTrackVote === t.track_id ? 'voted' : ''}`}
+                        onClick={() => handleVoteTrack(t.track_id)}
+                      >
+                        {myTrackVote === t.track_id ? '✓' : '▲'} {t.vote_count || 0}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : viewingSchool ? (
+            <p className="empty-state">No listeners from {viewingSchool} yet. Share the app!</p>
+          ) : null}
+        </div>
       </section>
 
       <section className="school-section">
         <h2>Best Music Taste</h2>
-        <p style={{color: '#b3b3b3', marginBottom: '12px', fontSize: '0.85rem'}}>Vote for the school with the best music taste (not your own)</p>
+        <p className="subtitle">Vote for the school with the best music taste (not your own)</p>
         <div className="school-vote-grid">
           {schools.filter(s => s !== school).map(s => {
             const ranking = schoolRankings.find(r => r.school === s)
@@ -264,36 +268,38 @@ function App() {
 
       <section className="discover-section">
         <h2>Listeners Also Like</h2>
-        <button onClick={loadAlsoLike} disabled={loading}>
+        <button className="action-btn" onClick={loadAlsoLike} disabled={loading}>
           {loading ? 'Finding...' : 'Find Similar Tracks'}
         </button>
         {alsoLike.length > 0 ? (
-          <ol>
-            {alsoLike.map((t, i) => (
-              <li key={i}>
-                {t.image_url && <img src={t.image_url} alt="" />}
-                <div>
-                  <strong>{t.track_name}</strong>
-                  <span>{t.artist_name} • {t.listener_count} similar listener{t.listener_count > 1 ? 's' : ''}</span>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <div className="school-card">
+            <ol>
+              {alsoLike.map((t, i) => (
+                <li key={i}>
+                  {t.image_url && <img src={t.image_url} alt="" />}
+                  <div>
+                    <strong>{t.track_name}</strong>
+                    <span>{t.artist_name} • {t.listener_count} similar listener{t.listener_count > 1 ? 's' : ''}</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
         ) : alsoLikeLoaded ? (
-          <p style={{color: '#b3b3b3'}}>Not enough users yet to find matches. Invite friends!</p>
+          <p className="empty-state">Not enough users yet to find matches. Invite friends!</p>
         ) : null}
       </section>
 
       {school && (
         <section className="discover-section">
           <h2>{school} Playlist</h2>
-          <button onClick={createPlaylist} disabled={playlistLoading}>
+          <button className="action-btn" onClick={createPlaylist} disabled={playlistLoading}>
             {playlistLoading ? 'Creating...' : 'Create Campus Playlist on Spotify'}
           </button>
           {playlistUrl && (
             <p style={{marginTop: '12px'}}>
-              <a href={playlistUrl} target="_blank" rel="noreferrer" style={{color: '#1db954'}}>
-                Open playlist in Spotify
+              <a href={playlistUrl} target="_blank" rel="noreferrer" className="playlist-link">
+                Open playlist in Spotify →
               </a>
             </p>
           )}
