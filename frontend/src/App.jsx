@@ -2,8 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import './App.css'
 
-const API = '/api'
-// Ensure cookies flow between frontend and backend in dev
+// In dev, VITE_API_URL is undefined and we use the Vite proxy at /api.
+// In prod, set VITE_API_URL=https://your-backend.up.railway.app
+const API_BASE = import.meta.env.VITE_API_URL || ''
+const API = API_BASE ? API_BASE : '/api'
+const LOGIN_URL = `${API_BASE || 'http://127.0.0.1:8080'}/login`
 axios.defaults.withCredentials = true
 
 const TIME_RANGES = [
@@ -598,7 +601,7 @@ function LoginPage() {
           Link your Spotify. See the songs your school has on repeat,
           vote for the anthem of the month, and find out which UC has better taste.
         </p>
-        <a href="http://127.0.0.1:8080/login" className="login-btn">
+        <a href={LOGIN_URL} className="login-btn">
           Continue with Spotify →
         </a>
         <div className="login-stats">

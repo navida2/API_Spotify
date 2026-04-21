@@ -9,6 +9,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, Cookie
 from fastapi.responses import RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 from itsdangerous import URLSafeSerializer, BadSignature
 
 from database import (
@@ -28,6 +29,8 @@ REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8080/callback
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 SESSION_SECRET = os.getenv("SESSION_SECRET") or secrets.token_urlsafe(32)
 COOKIE_NAME = "ucampus_session"
+# In production, cookies must be Secure + SameSite=None for cross-site flow
+IS_PROD = os.getenv("ENV") == "production"
 
 serializer = URLSafeSerializer(SESSION_SECRET, salt="session")
 
@@ -40,6 +43,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# CORS — allow the deployed frontend to hit the backend with cookies
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_URL],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ---------- Session helpers ----------
 
@@ -48,9 +60,8 @@ def set_session(response: Response, spotify_id: str):
     response.set_cookie(
         COOKIE_NAME, token,
         httponly=True,
-        samesite="lax",
-        secure=False,
-        domain="127.0.0.1",  # explicit domain so cookie sticks across port 8080 → 5173 proxy
+        samesite="none" if IS_PROD else "lax",
+        secure=IS_PROD,
         path="/",
         max_age=60 * 60 * 24 * 30,
     )
@@ -349,7 +360,7 @@ import random
 @app.get("/battle/next")
 async def battle_next(user: dict = Depends(get_current_user)):
     """Serve two random schools with their top 5 tracks, labeled A and B.
-    School names are NOT returned — only after the user votes."""
+    School names are NOT returned - only after the user votes."""
     eligible = await get_schools_with_tracks(min_tracks=5)
     if len(eligible) < 2:
         raise HTTPException(status_code=404, detail="Not enough schools with tracks yet")
@@ -412,7 +423,7 @@ async def create_campus_playlist(
         user,
         f"https://api.spotify.com/v1/users/{user['spotify_id']}/playlists",
         {
-            "name": f"{school} — Campus Top 20",
+            "name": f"{school} - Campus Top 20",
             "description": f"What {school} is listening to right now. Built with UCampus.",
             "public": True,
         },

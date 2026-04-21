@@ -1,7 +1,8 @@
 import aiosqlite
+import os
 import time
 
-DB_PATH = "app.db"
+DB_PATH = os.getenv("DB_PATH", "app.db")
 
 SCHOOLS = [
     "UC Berkeley",
@@ -302,7 +303,7 @@ async def get_user_school_vote(spotify_id):
 
 
 async def get_listeners_also_like(spotify_id, time_range="short_term", limit=10):
-    """People who share at least one track with you — what else do they listen to?"""
+    """People who share at least one track with you - what else do they listen to?"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
