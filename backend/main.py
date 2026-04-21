@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from itsdangerous import URLSafeSerializer, BadSignature
 
-from backend.database import (
+from database import (
     init_db, save_user, update_tokens, save_top_tracks, get_user_top_tracks,
     get_school_top_tracks, get_school_stats, set_school, detect_school, SCHOOLS,
     get_listeners_also_like, get_school_track_ids, get_user,
