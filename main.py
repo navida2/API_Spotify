@@ -6,7 +6,9 @@ from urllib.parse import urlencode
 import httpx
 from database import (
     init_db, save_user, save_top_tracks, get_school_top_tracks,
-    set_school, detect_school, SCHOOLS
+    set_school, detect_school, SCHOOLS, get_listeners_also_like,
+    get_school_track_ids, get_user, vote_for_track, get_user_track_vote,
+    vote_for_school, get_school_rankings, get_user_school_vote
 )
 
 load_dotenv()
@@ -29,7 +31,7 @@ def login():
         "client_id": CLIENT_ID,
         "response_type": "code",
         "redirect_uri": REDIRECT_URI,
-        "scope": "user-read-private user-top-read user-read-email"
+        "scope": "user-read-private user-top-read user-read-email playlist-modify-public"
     })
     return RedirectResponse(f"https://accounts.spotify.com/authorize?{params}")
 
@@ -67,7 +69,7 @@ async def callback(code: str):
         refresh_token=token_data["refresh_token"],
         school=school,
     )
-    # Auto-save top tracks to DB
+
     async with httpx.AsyncClient() as client:
         for tr in ["short_term", "medium_term", "long_term"]:
             tracks_resp = await client.get(
@@ -78,7 +80,7 @@ async def callback(code: str):
             if "items" in tracks_data:
                 await save_top_tracks(profile["id"], tracks_data["items"], tr)
 
-    return {"message": "Logged in successfully", "user": profile["display_name"], "school": school}
+    return RedirectResponse("http://localhost:5173")
 
 @app.get("/me")
 async def me():
@@ -87,7 +89,12 @@ async def me():
             "https://api.spotify.com/v1/me",
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
         )
-    return response.json()
+    profile = response.json()
+    # Include school from DB
+    user_data = await get_user(token_store.get("spotify_id"))
+    if user_data:
+        profile["school"] = user_data.get("school")
+    return profile
 
 @app.get("/top-tracks")
 async def top_tracks(time_range: str = "short_term", limit: int = 10):
@@ -125,70 +132,6 @@ async def audio_features(time_range: str = "short_term", limit: int = 10):
         )
     return features_response.json()
 
-@app.get("/discover")
-async def discover(time_range: str = "short_term", limit: int = 20):
-    async with httpx.AsyncClient() as client:
-        tracks_resp = await client.get(
-            f"https://api.spotify.com/v1/me/top/tracks?time_range={time_range}&limit=5",
-            headers={"Authorization": f"Bearer {token_store['access_token']}"},
-        )
-        tracks = tracks_resp.json()["items"]
-
-        artists_resp = await client.get(
-            f"https://api.spotify.com/v1/me/top/artists?time_range={time_range}&limit=5",
-            headers={"Authorization": f"Bearer {token_store['access_token']}"},
-        )
-        artists = artists_resp.json()["items"]
-
-        track_ids = ",".join([t["id"] for t in tracks])
-        features_resp = await client.get(
-            f"https://api.spotify.com/v1/audio-features?ids={track_ids}",
-            headers={"Authorization": f"Bearer {token_store['access_token']}"},
-        )
-        features = [f for f in features_resp.json()["audio_features"] if f]
-
-        avg = {}
-        for key in ["danceability", "energy", "valence", "acousticness", "tempo"]:
-            vals = [f[key] for f in features]
-            avg[key] = round(sum(vals) / len(vals), 2) if vals else 0
-
-        seed_tracks = ",".join([t["id"] for t in tracks[:3]])
-        seed_artists = ",".join([a["id"] for a in artists[:2]])
-
-        recs_resp = await client.get(
-            f"https://api.spotify.com/v1/recommendations"
-            f"?seed_tracks={seed_tracks}"
-            f"&seed_artists={seed_artists}"
-            f"&limit={limit}"
-            f"&target_danceability={avg['danceability']}"
-            f"&target_energy={avg['energy']}"
-            f"&target_valence={avg['valence']}"
-            f"&target_acousticness={avg['acousticness']}"
-            f"&target_tempo={avg['tempo']}",
-            headers={"Authorization": f"Bearer {token_store['access_token']}"},
-        )
-        recs = recs_resp.json()["tracks"]
-
-        results = []
-        for t in recs:
-            results.append({
-                "name": t["name"],
-                "artist": t["artists"][0]["name"],
-                "album": t["album"]["name"],
-                "preview_url": t["preview_url"],
-                "spotify_url": t["external_urls"]["spotify"],
-                "image": t["album"]["images"][0]["url"] if t["album"]["images"] else None,
-            })
-
-    return {
-        "seeds": {
-            "tracks": [t["name"] for t in tracks[:3]],
-            "artists": [a["name"] for a in artists[:2]],
-        },
-        "audio_profile": avg,
-        "recommendations": results,
-    }
-
 @app.get("/schools")
 def schools():
     return SCHOOLS
@@ -209,3 +152,100 @@ async def school_top_tracks(school: str, time_range: str = "short_term"):
         return {"error": "Invalid school"}
     tracks = await get_school_top_tracks(school, time_range)
     return {"school": school, "top_tracks": tracks}
+
+@app.post("/vote-track")
+async def vote_track(track_id: str, school: str):
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"error": "Not logged in"}
+    user_data = await get_user(spotify_id)
+    if not user_data or user_data.get("school") != school:
+        return {"error": "You can only vote for tracks at your own school"}
+    await vote_for_track(spotify_id, track_id, school)
+    return {"message": "Vote recorded"}
+
+@app.get("/my-track-vote")
+async def my_track_vote(school: str):
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"vote": None}
+    vote = await get_user_track_vote(spotify_id, school)
+    return {"vote": vote}
+
+@app.post("/vote-school")
+async def vote_school_endpoint(voted_for: str):
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"error": "Not logged in"}
+    if voted_for not in SCHOOLS:
+        return {"error": "Invalid school"}
+    user_data = await get_user(spotify_id)
+    if user_data and user_data.get("school") == voted_for:
+        return {"error": "You can't vote for your own school"}
+    await vote_for_school(spotify_id, voted_for)
+    return {"message": f"Voted for {voted_for}"}
+
+@app.get("/school-rankings")
+async def school_rankings():
+    rankings = await get_school_rankings()
+    return {"rankings": rankings}
+
+@app.get("/my-school-vote")
+async def my_school_vote():
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"vote": None}
+    vote = await get_user_school_vote(spotify_id)
+    return {"vote": vote}
+
+@app.get("/listeners-also-like")
+async def listeners_also_like(time_range: str = "short_term"):
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"error": "Not logged in"}
+    tracks = await get_listeners_also_like(spotify_id, time_range)
+    return {"tracks": tracks}
+
+@app.get("/create-campus-playlist")
+async def create_campus_playlist(school: str, time_range: str = "short_term"):
+    if school not in SCHOOLS:
+        return {"error": "Invalid school"}
+    spotify_id = token_store.get("spotify_id")
+    if not spotify_id:
+        return {"error": "Not logged in"}
+
+    tracks = await get_school_track_ids(school, time_range, limit=20)
+    if not tracks:
+        return {"error": "No tracks found for this school"}
+
+    track_uris = [f"spotify:track:{t['track_id']}" for t in tracks]
+
+    async with httpx.AsyncClient() as client:
+        create_resp = await client.post(
+            f"https://api.spotify.com/v1/users/{spotify_id}/playlists",
+            headers={
+                "Authorization": f"Bearer {token_store['access_token']}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "name": f"{school} Top Tracks",
+                "description": f"The most popular tracks at {school} right now",
+                "public": True,
+            },
+        )
+        playlist = create_resp.json()
+
+        await client.post(
+            f"https://api.spotify.com/v1/playlists/{playlist['id']}/tracks",
+            headers={
+                "Authorization": f"Bearer {token_store['access_token']}",
+                "Content-Type": "application/json",
+            },
+            json={"uris": track_uris},
+        )
+
+    return {
+        "message": f"Created '{school} Top Tracks' playlist",
+        "playlist_url": playlist["external_urls"]["spotify"],
+        "track_count": len(track_uris),
+    }

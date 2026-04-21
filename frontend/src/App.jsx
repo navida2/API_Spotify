@@ -1,120 +1,305 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
+import { useState, useEffect } from 'react'
 import './App.css'
+import axios from 'axios'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [user, setUser] = useState(null)
+  const [topTracks, setTopTracks] = useState([])
+  const [topArtists, setTopArtists] = useState([])
+  const [school, setSchool] = useState(null)
+  const [schools, setSchools] = useState([])
+  const [schoolTracks, setSchoolTracks] = useState([])
+  const [viewingSchool, setViewingSchool] = useState(null)
+  const [timeRange, setTimeRange] = useState('short_term')
+  const [alsoLike, setAlsoLike] = useState([])
+  const [alsoLikeLoaded, setAlsoLikeLoaded] = useState(false)
+  const [playlistLoading, setPlaylistLoading] = useState(false)
+  const [playlistUrl, setPlaylistUrl] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [myTrackVote, setMyTrackVote] = useState(null)
+  const [schoolRankings, setSchoolRankings] = useState([])
+  const [mySchoolVote, setMySchoolVote] = useState(null)
+
+  useEffect(() => {
+    loadUser()
+    loadSchools()
+    loadSchoolRankings()
+    loadMySchoolVote()
+  }, [])
+
+  useEffect(() => {
+    if (user) {
+      loadTopTracks()
+      loadTopArtists()
+      if (user.school) {
+        setSchool(user.school)
+        setViewingSchool(user.school)
+        loadSchoolTracks(user.school)
+        loadMyTrackVote(user.school)
+      }
+    }
+  }, [user, timeRange])
+
+  async function loadUser() {
+    try {
+      const res = await axios.get('/api/me')
+      setUser(res.data)
+    } catch {
+      setUser(null)
+    }
+  }
+
+  async function loadSchools() {
+    try {
+      const res = await axios.get('/api/schools')
+      setSchools(res.data)
+    } catch {}
+  }
+
+  async function loadTopTracks() {
+    const res = await axios.get(`/api/top-tracks?time_range=${timeRange}&limit=10`)
+    setTopTracks(res.data.items || [])
+  }
+
+  async function loadTopArtists() {
+    const res = await axios.get(`/api/top-artists?time_range=${timeRange}&limit=10`)
+    setTopArtists(res.data.items || [])
+  }
+
+  async function handleSetSchool(s) {
+    await axios.post(`/api/set-school?school=${encodeURIComponent(s)}`)
+    setSchool(s)
+    setViewingSchool(s)
+    loadSchoolTracks(s)
+    loadMyTrackVote(s)
+  }
+
+  async function loadSchoolTracks(s) {
+    const res = await axios.get(`/api/school-top-tracks?school=${encodeURIComponent(s)}&time_range=${timeRange}`)
+    setSchoolTracks(res.data.top_tracks || [])
+  }
+
+  async function loadMyTrackVote(s) {
+    const res = await axios.get(`/api/my-track-vote?school=${encodeURIComponent(s)}`)
+    setMyTrackVote(res.data.vote)
+  }
+
+  async function handleVoteTrack(trackId) {
+    await axios.post(`/api/vote-track?track_id=${trackId}&school=${encodeURIComponent(school)}`)
+    setMyTrackVote(trackId)
+    loadSchoolTracks(viewingSchool)
+  }
+
+  async function loadSchoolRankings() {
+    try {
+      const res = await axios.get('/api/school-rankings')
+      setSchoolRankings(res.data.rankings || [])
+    } catch {}
+  }
+
+  async function loadMySchoolVote() {
+    try {
+      const res = await axios.get('/api/my-school-vote')
+      setMySchoolVote(res.data.vote)
+    } catch {}
+  }
+
+  async function handleVoteSchool(s) {
+    await axios.post(`/api/vote-school?voted_for=${encodeURIComponent(s)}`)
+    setMySchoolVote(s)
+    loadSchoolRankings()
+  }
+
+  async function loadAlsoLike() {
+    setLoading(true)
+    const res = await axios.get(`/api/listeners-also-like?time_range=${timeRange}`)
+    setAlsoLike(res.data.tracks || [])
+    setAlsoLikeLoaded(true)
+    setLoading(false)
+  }
+
+  async function createPlaylist() {
+    setPlaylistLoading(true)
+    const res = await axios.get(`/api/create-campus-playlist?school=${encodeURIComponent(school)}&time_range=${timeRange}`)
+    setPlaylistUrl(res.data.playlist_url || null)
+    setPlaylistLoading(false)
+  }
+
+  if (!user) {
+    return (
+      <div className="login-page">
+        <h1>Spotify Profile</h1>
+        <p>See your stats, discover new music, and compare with your campus.</p>
+        <a href="http://127.0.0.1:8080/login" className="login-btn">
+          Log in with Spotify
+        </a>
+      </div>
+    )
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app">
+      <header>
+        <div className="user-info">
+          {user.images?.[0] && <img src={user.images[0].url} alt="pfp" className="pfp" />}
+          <div>
+            <h1>{user.display_name}</h1>
+            <p>{user.followers?.total} followers</p>
+          </div>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
+        {!school ? (
+          <select onChange={(e) => handleSetSchool(e.target.value)} defaultValue="">
+            <option value="" disabled>Pick your school</option>
+            {schools.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        ) : (
+          <span className="school-badge">{school}</span>
+        )}
+      </header>
+
+      <div className="time-toggle">
+        {[['short_term', '4 Weeks'], ['medium_term', '6 Months'], ['long_term', 'All Time']].map(([val, label]) => (
+          <button key={val} className={timeRange === val ? 'active' : ''} onClick={() => setTimeRange(val)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid">
+        <section>
+          <h2>Top Tracks</h2>
+          <ol>
+            {topTracks.map(t => (
+              <li key={t.id}>
+                <img src={t.album.images[2]?.url} alt="" />
+                <div>
+                  <strong>{t.name}</strong>
+                  <span>{t.artists[0].name}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section>
+          <h2>Top Artists</h2>
+          <ol>
+            {topArtists.map(a => (
+              <li key={a.id}>
+                <img src={a.images[2]?.url} alt="" />
+                <div>
+                  <strong>{a.name}</strong>
+                  <span>{a.genres?.slice(0, 2).join(', ')}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </div>
+
+      <section className="school-section">
+        <div style={{display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px'}}>
+          <h2 style={{margin: 0}}>Campus Top Tracks</h2>
+          <select
+            value={viewingSchool || ''}
+            onChange={(e) => {
+              setViewingSchool(e.target.value)
+              loadSchoolTracks(e.target.value)
+            }}
+            style={{background: '#282828', color: '#fff', border: '1px solid #444', padding: '6px 10px', borderRadius: '8px', fontSize: '0.85rem'}}
+          >
+            {schools.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
+        {viewingSchool && schoolTracks.length > 0 ? (
+          <>
+            {viewingSchool === school && (
+              <p style={{color: '#b3b3b3', marginBottom: '12px', fontSize: '0.85rem'}}>Vote for the best track at your school</p>
+            )}
+            <ol>
+              {schoolTracks.map((t, i) => (
+                <li key={i} className="votable-track">
+                  {t.image_url && <img src={t.image_url} alt="" />}
+                  <div style={{flex: 1}}>
+                    <strong>{t.track_name}</strong>
+                    <span>{t.artist_name} • {t.listener_count} listener{t.listener_count > 1 ? 's' : ''}</span>
+                  </div>
+                  {viewingSchool === school && (
+                    <button
+                      className={`vote-btn ${myTrackVote === t.track_id ? 'voted' : ''}`}
+                      onClick={() => handleVoteTrack(t.track_id)}
+                    >
+                      {myTrackVote === t.track_id ? '✓' : '♪'} {t.vote_count || 0}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </>
+        ) : viewingSchool ? (
+          <p style={{color: '#b3b3b3'}}>No data yet for this school.</p>
+        ) : null}
+      </section>
+
+      <section className="school-section">
+        <h2>Best Music Taste</h2>
+        <p style={{color: '#b3b3b3', marginBottom: '12px', fontSize: '0.85rem'}}>Vote for the school with the best music taste (not your own)</p>
+        <div className="school-vote-grid">
+          {schools.filter(s => s !== school).map(s => {
+            const ranking = schoolRankings.find(r => r.school === s)
+            const votes = ranking ? ranking.votes : 0
+            return (
+              <button
+                key={s}
+                className={`school-vote-btn ${mySchoolVote === s ? 'voted' : ''}`}
+                onClick={() => handleVoteSchool(s)}
+              >
+                <strong>{s}</strong>
+                <span>{votes} vote{votes !== 1 ? 's' : ''}</span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="discover-section">
+        <h2>Listeners Also Like</h2>
+        <button onClick={loadAlsoLike} disabled={loading}>
+          {loading ? 'Finding...' : 'Find Similar Tracks'}
         </button>
+        {alsoLike.length > 0 ? (
+          <ol>
+            {alsoLike.map((t, i) => (
+              <li key={i}>
+                {t.image_url && <img src={t.image_url} alt="" />}
+                <div>
+                  <strong>{t.track_name}</strong>
+                  <span>{t.artist_name} • {t.listener_count} similar listener{t.listener_count > 1 ? 's' : ''}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : alsoLikeLoaded ? (
+          <p style={{color: '#b3b3b3'}}>Not enough users yet to find matches. Invite friends!</p>
+        ) : null}
       </section>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
+      {school && (
+        <section className="discover-section">
+          <h2>{school} Playlist</h2>
+          <button onClick={createPlaylist} disabled={playlistLoading}>
+            {playlistLoading ? 'Creating...' : 'Create Campus Playlist on Spotify'}
+          </button>
+          {playlistUrl && (
+            <p style={{marginTop: '12px'}}>
+              <a href={playlistUrl} target="_blank" rel="noreferrer" style={{color: '#1db954'}}>
+                Open playlist in Spotify
               </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+            </p>
+          )}
+        </section>
+      )}
+    </div>
   )
 }
 
