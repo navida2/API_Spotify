@@ -109,3 +109,72 @@ async def audio_features(time_range: str = "short_term", limit: int = 10):
             headers={"Authorization": f"Bearer {token_store['access_token']}"},
         )
     return features_response.json()
+
+@app.get("/discover")
+async def discover(time_range: str = "short_term", limit: int = 20):
+    async with httpx.AsyncClient() as client:
+        # Get top tracks and artists for seeds
+        tracks_resp = await client.get(
+            f"https://api.spotify.com/v1/me/top/tracks?time_range={time_range}&limit=5",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+        tracks = tracks_resp.json()["items"]
+
+        artists_resp = await client.get(
+            f"https://api.spotify.com/v1/me/top/artists?time_range={time_range}&limit=5",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+        artists = artists_resp.json()["items"]
+
+        # Get audio features for your top tracks
+        track_ids = ",".join([t["id"] for t in tracks])
+        features_resp = await client.get(
+            f"https://api.spotify.com/v1/audio-features?ids={track_ids}",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+        features = [f for f in features_resp.json()["audio_features"] if f]
+
+        # Calculate your averages
+        avg = {}
+        for key in ["danceability", "energy", "valence", "acousticness", "tempo"]:
+            vals = [f[key] for f in features]
+            avg[key] = round(sum(vals) / len(vals), 2) if vals else 0
+
+        # Seeds: 3 tracks + 2 artists
+        seed_tracks = ",".join([t["id"] for t in tracks[:3]])
+        seed_artists = ",".join([a["id"] for a in artists[:2]])
+
+        # Recommendations with your audio profile as targets
+        recs_resp = await client.get(
+            f"https://api.spotify.com/v1/recommendations"
+            f"?seed_tracks={seed_tracks}"
+            f"&seed_artists={seed_artists}"
+            f"&limit={limit}"
+            f"&target_danceability={avg['danceability']}"
+            f"&target_energy={avg['energy']}"
+            f"&target_valence={avg['valence']}"
+            f"&target_acousticness={avg['acousticness']}"
+            f"&target_tempo={avg['tempo']}",
+            headers={"Authorization": f"Bearer {token_store['access_token']}"},
+        )
+        recs = recs_resp.json()["tracks"]
+
+        results = []
+        for t in recs:
+            results.append({
+                "name": t["name"],
+                "artist": t["artists"][0]["name"],
+                "album": t["album"]["name"],
+                "preview_url": t["preview_url"],
+                "spotify_url": t["external_urls"]["spotify"],
+                "image": t["album"]["images"][0]["url"] if t["album"]["images"] else None,
+            })
+
+    return {
+        "seeds": {
+            "tracks": [t["name"] for t in tracks[:3]],
+            "artists": [a["name"] for a in artists[:2]],
+        },
+        "audio_profile": avg,
+        "recommendations": results,
+    }
